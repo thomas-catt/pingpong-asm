@@ -11,6 +11,9 @@ const_strings_endl:
 const_strings_hello:
     db "Hello world.$"
     
+const_strings_win:
+    db "Game over. Player ? won!$"
+    
 const_strings_single:
     db "?$"
 
@@ -29,24 +32,43 @@ const_controls_move_right_up:
 const_controls_pause:
     db 1
 
+const_controls_quit:
+    db 16
+
 const_chars_players:
     db ' ', 11110000b
 
 const_chars_bg:
-    dw 0x0720
+    db ' ', 00000111b
 
 const_chars_ball:
     db '*', 00000100b
 
+const_chars_debugA:
+    db 'L', 00100111b
+
+const_chars_debugB:
+    db 'R', 01000111b
+
 const_player_width:
     db 20
+
+const_player_speed:
+    db 3
 
 const_players_length:
     db 2
 
-const_players_names:
-    db "A"
-    db "B"
+const_game_score_limit:
+    db 5
+
+const_players_score_positions:
+    db 75, 5
+    db 75, 20
+
+const_players_names_positions:
+    db 5, 5
+    db 5, 20
 
 const_players_ball_placement:
     db 40, 23
@@ -56,6 +78,10 @@ const_players_placement:
     db 30, 0
     db 30, 24
 
+const_players_names:
+    db "A"
+    db "B"
+
 data_players_position:
     db 0, 0
     db 0, 0
@@ -64,7 +90,7 @@ data_ball_position:
     db 0, 0
 
 data_ball_prev_position:
-    db 40, 23
+    db 0, 0
 
 data_players_current:
     db 0
@@ -91,6 +117,8 @@ data_keyboard_key:
 data_isr_timer:
     dw 0, 0
 
+_MSG_BALL_BOUNCED: db "ball bounced$"
+_MSG_BALL_MISSED: db "ball missed$"
 
    
 ;
@@ -216,7 +244,31 @@ code_util_endl:
 code_game_check_ended:
     pusha
     
-    
+    mov cx, 0
+    add cl, [const_players_length]
+    mov bx, data_players_score
+    mov di, const_players_names
+    .for_each_player:
+        mov ah, [bx]
+        cmp ah, [const_game_score_limit]
+        jl .skip_game_end
+        call code_util_clear
+
+        mov dh, [di]
+        mov si, const_strings_win
+        add si, 18
+        mov [si], dh
+        sub si, 18
+        push si
+        call code_util_print
+        call code_util_endl
+        jmp code_end
+
+        .skip_game_end:
+        inc bx
+        inc di
+        loop .for_each_player
+
     
     popa
     ret
@@ -247,7 +299,46 @@ code_game_reset_positions:
     popa
     ret
 
+code_game_render:
+    pusha
+    mov ax, 0xb800
+    mov es, ax
 
+    mov cx, 0
+    add cl, [const_players_length]
+    mov si, const_players_score_positions
+    mov di, const_players_names_positions
+    mov bx, data_players_score
+    mov bp, const_players_names
+    
+    mov ax, [const_chars_bg]
+    .for_each_player:
+        push di
+        push si
+        call code_util_toPos
+        mov al, [bx]
+        add al, '0'
+        mov [es:di], ax
+        pop di
+
+        push si
+        mov si, di
+        push si
+        call code_util_toPos
+        mov al, [bp]
+        mov [es:di], ax
+        mov di, si
+        pop si
+    
+        add si, 2
+        add di, 2
+        inc bx
+        inc bp
+        loop .for_each_player
+
+
+    popa
+    ret
 
 code_players_display:
     pusha
@@ -260,12 +351,29 @@ code_players_display:
         add bx, si
         push bx
         call code_util_toPos
-
+        
+        mov dx, 0
+        mov dl, [bx + 1]
+        mov ax, 160
+        mul dx
+        mov dx, ax
+        
         ; padding before
         push di
+        push cx
+        cmp di, dx
+        jle .player_padding_before_skip
+        mov cx, di
+        sub cx, dx
+        shr cx, 1
         mov ax, [const_chars_bg]
-        sub di, 2
-        mov [es:di], ax
+        .player_padding_before:
+            sub di, 2
+            mov [es:di], ax
+            cmp di, 0
+            loop .player_padding_before
+        .player_padding_before_skip:
+        pop cx
         pop di
 
         ; now di has the position to start the player rendering at
@@ -280,8 +388,22 @@ code_players_display:
             loop .player_render_loop
 
         ; padding after
+        add dx, 160
+        push di
+        push cx
+        cmp di, dx
+        jge .player_padding_after_skip
+        mov cx, dx
+        sub cx, di
+        shr cx, 1
         mov ax, [const_chars_bg]
-        mov [es:di], ax
+        .player_padding_after:
+            mov [es:di], ax
+            add di, 2
+            loop .player_padding_after
+        .player_padding_after_skip:
+        pop cx
+        pop di
 
         pop cx
         add si, 2
@@ -313,20 +435,35 @@ code_players_ball_bounce:
     mov byte [data_players_current], 0
     .skip_player_length_loopover:
 
-    
-    cmp al, bl
+    ; mov cx, 0
+    ; add cl, bl
+    ; push cx
+    ; call code_util_print_number
+    ; call code_util_endl
+    ; mov cx, 0
+    ; add cl, al
+    ; push cx
+    ; call code_util_print_number
+    ; call code_util_endl
+
+
+    cmp bl, al
     jl .ball_missed
     add al, [const_player_width]
+    cmp bl, al
     jge .ball_missed
 
     ; ball bounced
-      
+
+    ; push _MSG_BALL_BOUNCED
+    ; call code_util_print
     jmp .end      
     .ball_missed:
+    ; push _MSG_BALL_MISSED
+    ; call code_util_print
     mov di, data_players_score
     mov ax, 0
     add al, [data_players_current]
-    shl al, 1
     add di, ax
     inc byte [di]
 
@@ -343,20 +480,28 @@ code_players_loop:
     pusha
     
     mov di, data_players_position
-    mov si, data_player_direction
     mov ax, 0
     add al, [data_players_current]
     shl al, 1
     add di, ax
 
-    ; push [di]
-    ; call code_util_print_number
-    ; call code_util_endl
-
-    mov ah, [cs:di]
-    mov al, [cs:si]
+    mov ah, [di]
+    mov al, [data_player_direction]
     add ah, al
-    mov [cs:di], ah
+    
+    cmp ah, 0
+    jge .skip_left_bound
+    mov ah, 0
+    jmp .skip
+    .skip_left_bound:
+    mov al, 80
+    sub al, [const_player_width]
+    cmp ah, al
+    jle .skip
+    mov ah, al
+
+    .skip:
+    mov [di], ah
 
     popa
     ret
@@ -391,6 +536,8 @@ code_ball_loop:
     add ah, bh
     add al, bl
 
+    mov cx, 0 ; ball touched top/bottom boundary?
+
     ; Check vertical boundary (ah is 0 or 25)
     cmp ah, 0
     je .flip_vertical
@@ -401,8 +548,7 @@ code_ball_loop:
     .flip_vertical:
     neg byte bh    ; Flip vertical direction (1 <-> -1)
     mov di, [data_players_position]
-    push ax
-    call code_players_ball_bounce
+    mov cx, 1
 
     .check_horizontal:
     ; Check horizontal boundary (al is 0 or 80)
@@ -419,17 +565,29 @@ code_ball_loop:
 
     mov [data_ball_position], ax
     mov [data_ball_direction], bx
+
+    cmp cx, 1
+    jne .skip_bounce_check
+    push ax
+    call code_players_ball_bounce
+    .skip_bounce_check:
     
     popa
     ret
 
+; arguments:
+; - pressed key scan code
 code_keyboard_control:
+    push bp
+    mov bp, sp
     pusha
 
+    mov bx, 0
+    mov ax, [bp + 4]    ; pressed key scan code
     mov si, data_player_direction
-    ; mov ax, 0
-    ; add al, [data_players_current]
-    ; add si, ax
+    ; push ax
+    ; call code_util_print_number
+    ; call code_util_endl
 
     mov al, [data_keyboard_key]
     cmp al, [const_controls_move_left_down]
@@ -447,10 +605,15 @@ code_keyboard_control:
     cmp al, [const_controls_pause]
     je .pause
 
+    cmp al, [const_controls_quit]
+    je .quit
+
     jmp .end
 
     .move_left_down:
-        mov byte [si], -1
+        mov bl, [const_player_speed]
+        neg bl
+        mov byte [si], bl
         jmp .end
     
     .move_left_up:
@@ -459,17 +622,24 @@ code_keyboard_control:
         jmp .end
     
     .move_right_down:
-        mov byte [si], 1
+        mov bl, [const_player_speed]
+        mov byte [si], bl
         jmp .end
     
     .pause:
         neg byte [data_game_paused]
         jmp .end
     
+    .quit:
+        neg byte [data_game_running]
+        jmp code_end
+        jmp .end
+    
     .end:
 
     popa
-    ret
+    pop bp
+    ret 2
 
 
 code_isr_timer:
@@ -481,17 +651,19 @@ code_isr_timer:
     cmp al, [data_keyboard_key]
     je .skip_keyboard_control
     mov [data_keyboard_key], al
+    push ax
     call code_keyboard_control
     .skip_keyboard_control:
     
     cmp byte [data_game_paused], 1
     jne .game_is_paused
-    
+
     call code_players_loop
     call code_ball_loop
 
     call code_ball_display
     call code_players_display
+    call code_game_render
     
     .game_is_paused:
     
@@ -520,10 +692,14 @@ code_hook_isr:
 
 code_unhook_isr:
     pusha
+
+    xor ax, ax
+    mov es, ax
+
     cli
-    mov ax, [data_isr_timer]
+    mov ax, [cs:data_isr_timer]
     mov word [es:8 * 4], ax
-    mov ax, [data_isr_timer + 2]
+    mov ax, [cs:data_isr_timer + 2]
     mov word [es:8 * 4 + 2], ax
     sti
     popa
@@ -540,5 +716,5 @@ code_inf:
 
 code_end:
     call code_unhook_isr
-    mov ax, 0x3100
+    mov ax, 0x4c00
     int 0x21
