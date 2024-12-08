@@ -14,6 +14,9 @@ const_strings_hello:
 const_strings_win:
     db "Game over. Player ? won!$"
     
+const_strings_quit:
+    db "You quit the game. Thank you for playing!$"
+    
 const_strings_single:
     db "?$"
 
@@ -33,7 +36,7 @@ const_controls_pause:
     db 1
 
 const_controls_quit:
-    db 16
+    db 144
 
 const_chars_players:
     db ' ', 11110000b
@@ -662,6 +665,14 @@ code_isr_timer:
     mov [data_keyboard_key], al
     push ax
     call code_keyboard_control
+
+    cmp byte [data_game_running], 1
+    je .skip_keyboard_control
+    call code_util_clear
+    push const_strings_quit
+    call code_util_print
+    call code_util_endl
+    jmp .game_is_paused
     .skip_keyboard_control:
     
     cmp byte [data_game_paused], 1
