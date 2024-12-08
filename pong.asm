@@ -111,6 +111,9 @@ data_game_paused:
 data_game_running:
     db 1
 
+data_game_won:
+    db 0
+
 data_keyboard_key:
     db 0
 
@@ -252,17 +255,14 @@ code_game_check_ended:
         mov ah, [bx]
         cmp ah, [const_game_score_limit]
         jl .skip_game_end
-        call code_util_clear
-
         mov dh, [di]
         mov si, const_strings_win
         add si, 18
         mov [si], dh
-        sub si, 18
-        push si
-        call code_util_print
-        call code_util_endl
-        jmp code_end
+
+        mov byte [data_game_running], 0
+        mov byte [data_game_won], 1
+        jmp .game_end
 
         .skip_game_end:
         inc bx
@@ -270,6 +270,7 @@ code_game_check_ended:
         loop .for_each_player
 
     
+    .game_end:
     popa
     ret
 
@@ -304,6 +305,9 @@ code_game_render:
     mov ax, 0xb800
     mov es, ax
 
+    cmp byte [data_game_won], 1
+    je .skip_game_render
+
     mov cx, 0
     add cl, [const_players_length]
     mov si, const_players_score_positions
@@ -335,8 +339,14 @@ code_game_render:
         inc bx
         inc bp
         loop .for_each_player
-
-
+    
+    jmp .end
+    .skip_game_render:
+        call code_util_clear
+        push const_strings_win
+        call code_util_print
+        call code_util_endl
+    .end:
     popa
     ret
 
@@ -408,7 +418,7 @@ code_players_display:
         pop cx
         add si, 2
         loop .for_each_player
-    
+
     popa
     ret
 
@@ -632,7 +642,6 @@ code_keyboard_control:
     
     .quit:
         neg byte [data_game_running]
-        jmp code_end
         jmp .end
     
     .end:
@@ -697,11 +706,12 @@ code_unhook_isr:
     mov es, ax
 
     cli
-    mov ax, [cs:data_isr_timer]
+    mov ax, [data_isr_timer]       ; Restore low word (offset)
     mov word [es:8 * 4], ax
-    mov ax, [cs:data_isr_timer + 2]
+    mov ax, [data_isr_timer + 2]   ; Restore high word (segment)
     mov word [es:8 * 4 + 2], ax
     sti
+
     popa
     ret
 
